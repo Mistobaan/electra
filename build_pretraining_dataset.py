@@ -31,7 +31,8 @@ import logging
 import tensorflow.compat.v1 as tf
 import humanize
 
-from model import tokenization
+from transformers import BertTokenizerFast
+#from model import tokenization
 from util import utils
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'WARNING').upper()
@@ -108,11 +109,12 @@ class ExampleBuilder(object):
 
     def _make_tf_example(self, first_segment, second_segment):
         """Converts two "segments" of text into a tf.train.Example."""
-        vocab = self._tokenizer.vocab
-        input_ids = [vocab["[CLS]"]] + first_segment + [vocab["[SEP]"]]
+        SEP = self._tokenizer.sep_token_id
+        CLS = self._tokenizer.cls_token_id
+        input_ids = [CLS] + first_segment + [SEP]
         segment_ids = [0] * len(input_ids)
         if second_segment:
-            input_ids += second_segment + [vocab["[SEP]"]]
+            input_ids += second_segment + [SEP]
             segment_ids += [1] * (len(second_segment) + 1)
         input_mask = [1] * len(input_ids)
         input_ids += [0] * (self._max_length - len(input_ids))
@@ -125,14 +127,13 @@ class ExampleBuilder(object):
         }))
         return tf_example
 
-
 class ExampleWriter(object):
     """Writes pre-training examples to disk."""
 
     def __init__(self, output_fname, vocab_file, max_seq_length,
                  blanks_separate_docs, do_lower_case):
         self._blanks_separate_docs = blanks_separate_docs
-        tokenizer = tokenization.FullTokenizer(
+        tokenizer = BertTokenizerFast(
             vocab_file=vocab_file,
             do_lower_case=do_lower_case)
         self._example_builder = ExampleBuilder(tokenizer, max_seq_length)
@@ -229,8 +230,13 @@ class Counter(object):
 
 def example_writer(output_fname_template: str, counter: Counter, message_queue: Queue):
     output_fname = output_fname_template.format(counter.increment())
+    Z_NO_FLUSH = 0
+    Z_PARTIAL_FLUSH = 1
+    Z_SYNC_FLUSH = 2
+    Z_FULL_FLUSH = 3
     options = tf.io.TFRecordOptions(
-        compression_type='ZLIB', flush_mode=None, input_buffer_size=None,
+        compression_type='ZLIB', flush_mode=Z_NO_FLUSH, 
+        input_buffer_size=None,
         output_buffer_size=None, window_bits=None, compression_level=None,
         compression_method=None, mem_level=None, compression_strategy=None
     )
@@ -265,25 +271,82 @@ def example_writer(output_fname_template: str, counter: Counter, message_queue: 
             break
     return total
 
+class TFWriter(object):
 
-def line_tokenizer_reader(args, file_queue: Queue, message_queue: Queue, line_counter: Counter):
+    def __init__(self, max_byte_size: int, file_template: str, file_counter: Counter):
+        self._file_templates = file_template
+        self._file_counter = file_counter
+        self._fd = self.open_new_file()
+        self._total = 0
+        self._total_bytes = 0
+        self._max_byte_size_per_file = max_byte_size
+
+    def open_new_file(self):
+        Z_NO_FLUSH = 0
+        Z_PARTIAL_FLUSH = 1
+        Z_SYNC_FLUSH = 2
+        Z_FULL_FLUSH = 3
+        options = tf.io.TFRecordOptions(
+            compression_type='ZLIB', flush_mode=Z_NO_FLUSH, 
+            input_buffer_size=None,
+            output_buffer_size=None, window_bits=None, compression_level=None,
+            compression_method=None, mem_level=None, compression_strategy=None
+        )
+        output_fname = self._file_templates.format(self._file_counter.increment())
+        return tf.io.TFRecordWriter(output_fname, options=options)
+
+    def reset_stats(self):
+        self._total = 0
+        self._total_bytes = 0
+
+    def write(self, example):
+        self._fd.write(example)
+        self._total_bytes += len(example) 
+        self._total += 1
+        if self._total_bytes > self._max_byte_size_per_file:
+            self._fd.close()
+            self._fd = self.open_new_file()
+
+    def close(self):
+        self._fd.close() 
+
+def line_tokenizer_reader(args, file_queue: Queue, line_counter: Counter, file_counter: Counter):
     blanks_separate_docs = args.blanks_separate_docs
 
-    tokenizer = tokenization.FullTokenizer(
-        vocab_file=args.vocab_file,
-        do_lower_case=args.do_lower_case)
+    # tokenizer = tokenization.FullTokenizer(
+    #     vocab_file=args.vocab_file,
+    #     do_lower_case=args.do_lower_case)
+    # tokenizer = BertTokenizerFast(vocab_file=args.vocab_file, 
+    #                           do_lower_case=args.do_lower_case, 
+    #                           unk_token='[UNK]', 
+    #                           tokenize_chinese_chars=False, 
+    #                           wordpieces_prefix='##')
+    tokenizer = BertTokenizerFast(vocab_file=args.vocab_file,
+                          do_lower_case=args.do_lower_case, 
+                          unk_token='[UNK]', 
+                          sep_token='[SEP]',
+                          strip_accents=False,
+                          clean_text=True,
+                          tokenize_chinese_chars=False, 
+                          wordpieces_prefix='##')
 
     example_builder = ExampleBuilder(tokenizer, args.max_seq_length)
+    output_filename_template = os.path.join(
+        args.output_dir, "pretrain_data-{:04d}.tfrecord.lz")
 
     sent_messages = 0
     logger = logging.getLogger()
+
+    TWO_HUNDREND_MB = 200e6
+    writer = TFWriter(TWO_HUNDREND_MB, output_filename_template, file_counter)
 
     def send(example):
         if not example:
             return 0
         while not shutdown_event.is_set():
             try:
-                message_queue.put(example.SerializeToString(), block=True, timeout=0.05)
+                #message_queue.put(example.SerializeToString(), block=True, timeout=0.05)
+                writer.write(example.SerializeToString())
                 break
             except queue.Full:
                 logger.warning('queue is full')
@@ -338,35 +401,34 @@ def log_thread(line_counter):
 def distribute(args):
     # filenames, num_writers, num_readers, output_filename_template, output_file_size, compressed=False
     os.makedirs(args.output_dir)
-    output_filename_template = os.path.join(
-        args.output_dir, "pretrain_data-{:04d}.tfrecord.lz")
+
 
     logger = logging.getLogger()
     with multiprocessing.Manager() as manager:
         cpus = multiprocessing.cpu_count()-1 or 1
-        num_writers = 24
-        num_readers = cpus - num_writers
+        num_writers = cpus
+        #num_readers = cpus - num_writers
         # By default pool will size depending on cores available
         #writer_pool = Pool(num_writers)
         # By default pool will size depending on cores available
         #reader_pool = Pool(num_readers)
         file_queue = Queue(maxsize=1)
-        message_queue = Queue(maxsize=num_readers*8)
-        counter = Counter()
+        #message_queue = Queue(maxsize=num_readers*8)
+        file_counter = Counter()
         line_counter = Counter()
 
         # Start file listener ahead of doing the work
-        writers = []
-        for i in range(num_writers):
-            w = multiprocessing.Process(target=example_writer,
-                                        args=(output_filename_template, counter, message_queue))
-            w.start()
-            writers.append(w)
+        # writers = []
+        # for i in range(num_writers):
+        #     w = multiprocessing.Process(target=example_writer,
+        #                                 args=(output_filename_template, counter, message_queue))
+        #     w.start()
+        #     writers.append(w)
 
         readers = []
-        for i in range(num_readers):
+        for i in range(num_writers):
             r = multiprocessing.Process(target=line_tokenizer_reader,
-                                        args=(args, file_queue, message_queue, line_counter))
+                                        args=(args, file_queue, line_counter, file_counter))
             r.start()
             readers.append(r)
 
@@ -377,16 +439,16 @@ def distribute(args):
         random.shuffle(fnames)
         for f in fnames:
             file_queue.put(os.path.join(args.corpus_dir, f))
-        logger.info('waiting for readers to finish...')
+        logger.debug('waiting for readers to finish...')
         log_thread(line_counter)
         file_queue.close()
 
         for r in readers:
             r.join()
-        message_queue.join()
-        for w in writers:
-            w.join()
-        logger.info('done')
+        # message_queue.join()
+        # for w in writers:
+        #     w.join()
+        logger.debug('done')
         log.join()
 
 def signal_handler(a, b):
