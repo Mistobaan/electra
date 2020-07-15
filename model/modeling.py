@@ -283,21 +283,19 @@ class BertModel(object):
     return self.embedding_table
 
 
-def gelu(input_tensor):
+def gelu(x):
   """Gaussian Error Linear Unit.
-
   This is a smoother version of the RELU.
   Original paper: https://arxiv.org/abs/1606.08415
-
   Args:
-    input_tensor: float Tensor to perform activation.
-
+    x: float Tensor to perform activation.
   Returns:
-    `input_tensor` with the GELU activation applied.
+    `x` with the GELU activation applied.
   """
-  cdf = 0.5 * (1.0 + tf.math.erf(input_tensor / tf.sqrt(2.0)))
-  return input_tensor * cdf
-
+  PI = 3.141592653589793238462
+  cdf = 0.5 * (1.0 + tf.tanh(
+      (tf.sqrt(2 / PI) * (x + 0.044715 * tf.pow(x, 3)))))
+  return x * cdf
 
 def get_activation(activation_string):
   """Maps a string to a Python function, e.g., "relu" => `tf.nn.relu`.

@@ -20,6 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
+import functools
 
 import numpy as np
 import tensorflow.compat.v1 as tf
@@ -28,6 +29,7 @@ import configure_pretraining
 from model import tokenization
 from util import utils
 
+from typing import List
 
 def get_input_fn(config: configure_pretraining.PretrainingConfig, is_training,
                  num_cpu_threads=4):
@@ -36,6 +38,8 @@ def get_input_fn(config: configure_pretraining.PretrainingConfig, is_training,
   input_files = []
   for input_pattern in config.pretrain_tfrecords.split(","):
     input_files.extend(tf.io.gfile.glob(input_pattern))
+
+  assert input_files, "no files provided"
 
   def input_fn(params):
     """The actual input function."""
@@ -56,12 +60,30 @@ def get_input_fn(config: configure_pretraining.PretrainingConfig, is_training,
 
     # `sloppy` mode means that the interleaving is not exact. This adds
     # even more randomness to the training pipeline.
-    d = d.apply(
-        tf.data.experimental.parallel_interleave(
-            tf.data.TFRecordDataset,
-            sloppy=is_training,
-            cycle_length=cycle_length))
+    create_ds = functools.partial(tf.data.TFRecordDataset,  
+          compression_type='ZLIB',
+          num_parallel_reads=tf.data.experimental.AUTOTUNE)
+
+    parallel_interleave = tf.data.experimental.parallel_interleave(
+        map_func=create_ds,
+        cycle_length=cycle_length, 
+        # block_length=1, 
+        sloppy=is_training,
+        buffer_output_elements=None, 
+        prefetch_input_elements=None,
+    )
+    d = d.apply(parallel_interleave)
+
+    # d = d.apply(
+    #     tf.data.experimental.parallel_interleave(
+    #         functools.partial(tf.data.TFRecordDataset, compression_type='ZLIB'),
+    #         sloppy=is_training,
+    #         cycle_length=cycle_length))
     d = d.shuffle(buffer_size=100)
+
+    # TODO: add data echoing:
+    # echoing_factor = 2
+    # d = d.flat_map(lambda t: tf.data.Dataset.from_tensors(t).repeat(echoing_factor))
 
     # We must `drop_remainder` on training because the TPU requires fixed
     # size dimensions. For eval, we assume we are evaluating on the CPU or GPU

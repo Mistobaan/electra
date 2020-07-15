@@ -100,8 +100,8 @@ class PretrainingConfig(object):
     # update defaults with passed-in hyperparameters
     self.update(kwargs)
 
-    self.max_predictions_per_seq = int((self.mask_prob + 0.005) *
-                                       self.max_seq_length)
+    self.max_predictions_per_seq = 32 
+    #int((self.mask_prob + 0.005) * self.max_seq_length)
 
     # debug-mode settings
     if self.debug:

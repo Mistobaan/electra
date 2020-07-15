@@ -295,7 +295,7 @@ class TFWriter(object):
         output_fname = self._file_templates.format(self._file_counter.increment())
         return tf.io.TFRecordWriter(output_fname, options=options)
 
-    def reset_stats(self):
+    def _reset_stats(self):
         self._total = 0
         self._total_bytes = 0
 
@@ -306,6 +306,7 @@ class TFWriter(object):
         if self._total_bytes > self._max_byte_size_per_file:
             self._fd.close()
             self._fd = self.open_new_file()
+            self._reset_stats()
 
     def close(self):
         self._fd.close() 
@@ -337,7 +338,7 @@ def line_tokenizer_reader(args, file_queue: Queue, line_counter: Counter, file_c
     sent_messages = 0
     logger = logging.getLogger()
 
-    TWO_HUNDREND_MB = 200e6
+    TWO_HUNDREND_MB = 400e6
     writer = TFWriter(TWO_HUNDREND_MB, output_filename_template, file_counter)
 
     def send(example):
@@ -352,6 +353,7 @@ def line_tokenizer_reader(args, file_queue: Queue, line_counter: Counter, file_c
                 logger.warning('queue is full')
                 time.sleep(0.01)
                 continue
+        writer.close()
         return 1
     while not shutdown_event.is_set():
         try:

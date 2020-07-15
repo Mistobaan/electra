@@ -283,7 +283,7 @@ def run_finetuning(config: configure_finetuning.FinetuningConfig):
             for split in task.get_test_splits():
               model_runner.write_classification_outputs([task], trial, split)
           elif task.name == "squad":
-            scorer = model_runner.evaluate_task(task, "test", False)
+            scorer = model_runner.evaluate_task(task, split="test", return_results=False)
             scorer.write_predictions()
             preds = utils.load_json(config.qa_preds_file("squad"))
             null_odds = utils.load_json(config.qa_na_file("squad"))
