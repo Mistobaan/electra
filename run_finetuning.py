@@ -81,8 +81,10 @@ def model_fn_builder(config: configure_finetuning.FinetuningConfig, tasks,
     """The `model_fn` for TPUEstimator."""
     utils.log("Building model...")
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
-    model = FinetuningModel(
-        config, tasks, is_training, features, num_train_steps)
+   
+    with tf.tpu.bfloat16_scope():
+      model = FinetuningModel(
+          config, tasks, is_training, features, num_train_steps)
 
     # Load pre-trained weights from checkpoint
     init_checkpoint = config.init_checkpoint
@@ -185,13 +187,16 @@ class ModelRunner(object):
   def evaluate(self):
     return {task.name: self.evaluate_task(task) for task in self._tasks}
 
-  def evaluate_task(self, task, split="dev", return_results=True):
+  def evaluate_task(self, task, split="dev", return_results=True, hooks=[]):
     """Evaluate the current model."""
     utils.log("Evaluating", task.name)
     eval_input_fn, _ = self._preprocessor.prepare_predict([task], split)
     results = self._estimator.predict(input_fn=eval_input_fn,
+                                      #predict_keys,
+                                      hooks=hooks,
+                                      # checkpoint_path,
                                       yield_single_examples=True)
-    scorer = task.get_scorer()
+    scorer = task.get_scorer(split)
     for r in results:
       if r["task_id"] != len(self._tasks):  # ignore padding examples
         r = utils.nest_dict(r, self._config.task_names)
@@ -250,8 +255,8 @@ def run_finetuning(config: configure_finetuning.FinetuningConfig):
   # Setup for training
   results = []
   trial = 1
-  heading_info = "model={:}, trial {:}/{:}".format(
-      config.model_name, trial, config.num_trials)
+  heading_info = "model={:}, trial {:}/{:}/{:}".format(
+      config.experiment_name, config.model_name, trial, config.num_trials)
   heading = lambda msg: utils.heading(msg + ": " + heading_info)
   heading("Config")
   utils.log_config(config)
@@ -307,6 +312,8 @@ def main():
                       help="Location of data files (model weights, etc).")
   parser.add_argument("--model-name", required=True,
                       help="The name of the model being fine-tuned.")
+  parser.add_argument("--experiment-name", required=True,
+                      help="The name of the experiment for this run.")
   parser.add_argument("--hparams", default="{}",
                       help="JSON dict of model hyperparameters.")
   args = parser.parse_args()
@@ -316,7 +323,10 @@ def main():
     hparams = json.loads(args.hparams)
   tf.logging.set_verbosity(tf.logging.ERROR)
   run_finetuning(configure_finetuning.FinetuningConfig(
-      args.model_name, args.data_dir, **hparams))
+      args.model_name, 
+      args.data_dir, 
+      args.experiment_name,
+      **hparams))
 
 
 if __name__ == "__main__":

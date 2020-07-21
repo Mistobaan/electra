@@ -27,8 +27,9 @@ import tensorflow.compat.v1 as tf
 class FinetuningConfig(object):
   """Fine-tuning hyperparameters."""
 
-  def __init__(self, model_name, data_dir, **kwargs):
+  def __init__(self, model_name, data_dir, experiment_name='default', **kwargs):
     # general
+    self.experiment_name = experiment_name
     self.model_name = model_name
     self.debug = False  # debug mode for quickly running things
     self.log_examples = False  # print out some train examples for debugging

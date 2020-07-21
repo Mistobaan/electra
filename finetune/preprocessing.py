@@ -149,14 +149,13 @@ class Preprocessor(object):
     def input_fn(params):
       """The actual input function."""
       d = tf.data.TFRecordDataset(input_file)
+      d = d.map(self._decode_tfrecord)
+      d = d.cache()
       if is_training:
         d = d.repeat()
-        d = d.shuffle(buffer_size=100)
-      return d.apply(
-          tf.data.experimental.map_and_batch(
-              self._decode_tfrecord,
-              batch_size=params["batch_size"],
-              drop_remainder=True))
+        d = d.shuffle(buffer_size=1500)
+      d = d.batch(batch_size=params['batch_size'], drop_remainder=is_training)
+      return d
 
     return input_fn
 

@@ -65,7 +65,7 @@ class QAExample(task.Example):
 
   def __repr__(self):
     s = ""
-    s += "qas_id: %s" % (tokenization.printable_text(self.qas_id))
+    s += "qas_id: %s" % (tokenization.printable_text(str(self.qas_id)))
     s += ", question_text: %s" % (
         tokenization.printable_text(self.question_text))
     s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
@@ -237,9 +237,9 @@ class QATask(task.Task):
 
       example = QAExample(
           task_name=self.name,
-          eid=len(examples),
-          qas_id=qas_id,
-          qid=qid,
+          eid=len(examples), # Example ID
+          qas_id=qas_id, # QA ID
+          qid=qid, # Question ID
           question_text=question_text,
           doc_tokens=doc_tokens,
           orig_answer_text=orig_answer_text,
@@ -418,6 +418,12 @@ class QATask(task.Task):
 
   def get_prediction_module(self, bert_model, features, is_training,
                             percent_done):
+    """
+    Main QA Head (i.e. for base model with hidden size 768)
+    - BERT output: [batch_size, 768]
+    - Dense [batch_size, 768, 1]
+    - Logits []
+    """
     final_hidden = bert_model.get_sequence_output()
 
     final_hidden_shape = modeling.get_shape_list(final_hidden, expected_rank=3)
@@ -626,3 +632,106 @@ class SearchQA(MRQATask):
 class TriviaQA(MRQATask):
   def __init__(self, config: configure_finetuning.FinetuningConfig, tokenizer):
     super(TriviaQA, self).__init__(config, "triviaqa", tokenizer)
+
+class CovidQA(SQuADTask):
+  def __init__(self, config: configure_finetuning.FinetuningConfig, tokenizer):
+    super(CovidQA, self).__init__(config, "covidqa", tokenizer)
+
+  def parse_example(self, filename=None):
+        # os.path.join(
+        #   self.config.raw_data_dir(self.name),
+        # split + ("-debug" if self.config.debug else "") + ".json"), "r") as f:
+
+    with tf.io.gfile.GFile(filename) as f:
+      input_data = json.load(f)["data"]
+    split='test'
+    examples = []
+    example_failures = [0]
+    for entry in input_data:
+      for paragraph in entry["paragraphs"]:
+        ex = self.create_example(paragraph)
+        ex.eid = len(examples)
+        examples.append(ex)
+    self._examples[split] = examples
+    utils.log("{:} examples created, {:} failures".format(
+        len(examples), example_failures[0]))
+    return examples
+
+  def create_example(self, paragraph, split='test'):
+    paragraph_text = paragraph["context"]
+    doc_tokens = []
+    char_to_word_offset = []
+    prev_is_whitespace = True
+    for c in paragraph_text:
+      if is_whitespace(c):
+        prev_is_whitespace = True
+      else:
+        if prev_is_whitespace:
+          doc_tokens.append(c)
+        else:
+          doc_tokens[-1] += c
+        prev_is_whitespace = False
+      char_to_word_offset.append(len(doc_tokens) - 1)
+
+    for qa in paragraph["qas"]:
+      qas_id = qa["id"] if "id" in qa else None
+      qid = qa["qid"] if "qid" in qa else None
+      question_text = qa["question"]
+      start_position = None
+      end_position = None
+      orig_answer_text = None
+      is_impossible = False
+      if split == "train":
+        if self.v2:
+          is_impossible = qa["is_impossible"]
+        if not is_impossible:
+          if "detected_answers" in qa:  # MRQA format
+            answer = qa["detected_answers"][0]
+            answer_offset = answer["char_spans"][0][0]
+          else:  # SQuAD format
+            answer = qa["answers"][0]
+            answer_offset = answer["answer_start"]
+          orig_answer_text = answer["text"]
+          answer_length = len(orig_answer_text)
+          start_position = char_to_word_offset[answer_offset]
+          if answer_offset + answer_length - 1 >= len(char_to_word_offset):
+            utils.log("End position is out of document!")
+            example_failures[0] += 1
+            continue
+          end_position = char_to_word_offset[answer_offset + answer_length - 1]
+
+          # Only add answers where the text can be exactly recovered from the
+          # document. If this CAN'T happen it's likely due to weird Unicode
+          # stuff so we will just skip the example.
+          #
+          # Note that this means for training mode, every example is NOT
+          # guaranteed to be preserved.
+          actual_text = " ".join(
+              doc_tokens[start_position:(end_position + 1)])
+          cleaned_answer_text = " ".join(
+              tokenization.whitespace_tokenize(orig_answer_text))
+          actual_text = actual_text.lower()
+          cleaned_answer_text = cleaned_answer_text.lower()
+          if actual_text.find(cleaned_answer_text) == -1:
+            utils.log("Could not find answer: '{:}' in doc vs. "
+                      "'{:}' in provided answer".format(
+                          tokenization.printable_text(actual_text),
+                          tokenization.printable_text(cleaned_answer_text)))
+            example_failures[0] += 1
+            continue
+        else:
+          start_position = -1
+          end_position = -1
+          orig_answer_text = ""
+
+      return QAExample(
+          task_name=self.name,
+          eid=0, # Example ID
+          qas_id=qas_id, # QA ID
+          qid=qid, # Question ID
+          question_text=question_text,
+          doc_tokens=doc_tokens,
+          orig_answer_text=orig_answer_text,
+          start_position=start_position,
+          end_position=end_position,
+          is_impossible=is_impossible)
