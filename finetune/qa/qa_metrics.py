@@ -333,7 +333,7 @@ def get_final_text(config: configure_finetuning.FinetuningConfig, pred_text,
   #
   # What we really want to return is "Steve Smith".
   #
-  # Therefore, we have to apply a semi-complicated alignment heruistic between
+  # Therefore, we have to apply a semi-complicated alignment heuristic between
   # `pred_text` and `orig_text` to get a character-to-charcter alignment. This
   # can fail in certain cases in which case we just return `orig_text`.
 

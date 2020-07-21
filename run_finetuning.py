@@ -82,8 +82,7 @@ def model_fn_builder(config: configure_finetuning.FinetuningConfig, tasks,
     utils.log("Building model...")
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
    
-    with tf.tpu.bfloat16_scope():
-      model = FinetuningModel(
+    model = FinetuningModel(
           config, tasks, is_training, features, num_train_steps)
 
     # Load pre-trained weights from checkpoint

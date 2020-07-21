@@ -154,7 +154,7 @@ class Preprocessor(object):
       if is_training:
         d = d.repeat()
         d = d.shuffle(buffer_size=1500)
-      d = d.batch(batch_size=params['batch_size'], drop_remainder=is_training)
+      d = d.batch(batch_size=params['batch_size'], drop_remainder=True)
       return d
 
     return input_fn
