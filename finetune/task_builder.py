@@ -66,5 +66,7 @@ def get_task(config: configure_finetuning.FinetuningConfig, task_name,
     return qa_tasks.SearchQA(config, tokenizer)
   elif task_name == "chunk":
     return tagging_tasks.Chunking(config, tokenizer)
+  elif task_name == "covidqa":
+    return qa_tasks.CovidQA(config, tokenizer)
   else:
     raise ValueError("Unknown task " + task_name)

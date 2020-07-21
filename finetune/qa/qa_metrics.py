@@ -110,7 +110,11 @@ class SpanBasedQAScorer(scorer.Scorer):
       # keep track of the minimum score of null start+end of position 0
       score_null = 1000000  # large and positive
       for (feature_index, feature) in enumerate(features):
-        result = unique_id_to_result[feature[self._name + "_eid"]]
+        f = feature[self._name + "_eid"]
+        if not (f in unique_id_to_result):
+          print('skipping ', f)
+          continue
+        result = unique_id_to_result[f]
         if self._config.joint_prediction:
           start_indexes = result.start_top_index
           end_indexes = result.end_top_index
