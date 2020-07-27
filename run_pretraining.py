@@ -371,11 +371,15 @@ def main():
                       help="The name of the model being fine-tuned.")
   parser.add_argument("--hparams", default="{}",
                       help="JSON dict of model hyperparameters.")
+  parser.add_argument("--tpu-name", default="",
+                      help="name or address of the TPU")
   args = parser.parse_args()
   if args.hparams.endswith(".json"):
     hparams = utils.load_json(args.hparams)
   else:
     hparams = json.loads(args.hparams)
+  if args.tpu_name != "":
+    hparams.tpu_name = args.tpu_name
   tf.logging.set_verbosity(tf.logging.ERROR)
   train_or_eval(configure_pretraining.PretrainingConfig(
       args.model_name, args.data_dir, **hparams))
