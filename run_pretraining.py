@@ -379,7 +379,7 @@ def main():
   else:
     hparams = json.loads(args.hparams)
   if args.tpu_name != "":
-    hparams.tpu_name = args.tpu_name
+    hparams['tpu_name'] = args.tpu_name
   tf.logging.set_verbosity(tf.logging.ERROR)
   train_or_eval(configure_pretraining.PretrainingConfig(
       args.model_name, args.data_dir, **hparams))
