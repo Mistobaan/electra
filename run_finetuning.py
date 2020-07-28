@@ -145,9 +145,19 @@ class ModelRunner(object):
 
     is_per_host = tf.estimator.tpu.InputPipelineConfig.PER_HOST_V2
     tpu_cluster_resolver = None
-    if config.use_tpu and config.tpu_name:
-      tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
-          config.tpu_name, zone=config.tpu_zone, project=config.gcp_project)
+    if config.use_tpu:
+        tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(zone=config.tpu_zone, 
+                                                                                  project=config.gcp_project)
+        print('Running on TPU ', tpu_cluster_resolver.cluster_spec().as_dict()['worker'])
+            
+        if tpu_cluster_resolver:
+            tf.config.experimental_connect_to_cluster(tpu_cluster_resolver)
+            tf.tpu.experimental.initialize_tpu_system(tpu_cluster_resolver)
+        #     strategy = tf.distribute.experimental.TPUStrategy(tpu_cluster_resolver)
+        # else:
+        #     strategy = tf.distribute.get_strategy()
+        print("REPLICAS: ", strategy.num_replicas_in_sync)
+
     tpu_config = tf.estimator.tpu.TPUConfig(
         iterations_per_loop=config.iterations_per_loop,
         num_shards=config.num_tpu_cores,
